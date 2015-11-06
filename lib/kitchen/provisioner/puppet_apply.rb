@@ -133,7 +133,7 @@ module Kitchen
       default_config :puppet_debug, false
       default_config :puppet_verbose, false
       default_config :puppet_noop, false
-      default_config :platform, &:platform_name
+      default_config :puppet_platform, &:platform_name
       default_config :update_package_repos, true
       default_config :remove_puppet_repo, false
       default_config :custom_facts, {}
@@ -173,7 +173,7 @@ module Kitchen
         else
           case puppet_platform
           when 'debian', 'ubuntu'
-            info("Installing puppet on #{config[:platform]}")
+            info("Installing puppet on #{config[:puppet_platform]}")
             <<-INSTALL
               if [ ! $(which puppet) ]; then
                 #{sudo('apt-get')} -y install wget
@@ -699,7 +699,7 @@ module Kitchen
       end
 
       def puppet_platform
-        config[:platform].gsub(/-.*/, '')
+        config[:puppet_platform].gsub(/-.*/, '')
       end
 
       def facter_facts
@@ -765,7 +765,7 @@ module Kitchen
 
       # rubocop:disable Metrics/CyclomaticComplexity
       def puppet_apt_repo
-        platform_version = config[:platform].partition('-')[2]
+        platform_version = config[:puppet_platform].partition('-')[2]
         case puppet_platform
         when 'ubuntu'
           case platform_version
@@ -798,7 +798,7 @@ module Kitchen
             config[:puppet_apt_repo]
           end
         else
-          error("Unsupported Platform - #{config[:platform]}")
+          error("Unsupported Platform - #{config[:puppet_platform]}")
         end
       end
 
