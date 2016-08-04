@@ -637,12 +637,11 @@ module Kitchen
             puppet_logdest_flag,
             puppet_whitelist_exit_code
           ].join(' ')
-          if config[:custom_pre_apply_command]
-            result = <<-RUN
-              #{config[:custom_pre_apply_command]}
-              #{result}
-            RUN
-          end
+          result = <<-RUN
+            #{config[:custom_pre_apply_command]}
+            #{result}
+            #{config[:custom_post_apply_command]}
+          RUN
           info("Going to invoke puppet apply with: #{result}")
           result
         end
