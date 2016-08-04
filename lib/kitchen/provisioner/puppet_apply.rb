@@ -639,8 +639,11 @@ module Kitchen
           ].join(' ')
           result = <<-RUN
             #{config[:custom_pre_apply_command]}
+            function custom_post_apply_command {
+              #{config[:custom_post_apply_command]}
+            }
+            trap custom_post_apply_command EXIT
             #{result}
-            #{config[:custom_post_apply_command]}
           RUN
           info("Going to invoke puppet apply with: #{result}")
           result
