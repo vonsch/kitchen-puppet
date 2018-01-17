@@ -1,8 +1,8 @@
 # encoding: utf-8
 
-require_relative '../../spec_helper.rb'
+require 'spec_helper'
 
-require 'kitchen/provisioner/puppet_apply'
+require 'kitchen/provisioner/puppet_agent'
 require 'kitchen/transport/dummy'
 require 'kitchen/verifier/dummy'
 require 'kitchen/driver/dummy'
@@ -15,7 +15,7 @@ describe Kitchen::Busser do
   end
 end
 
-describe Kitchen::Provisioner::PuppetApply do
+describe Kitchen::Provisioner::PuppetAgent do
   let(:logged_output) { StringIO.new }
   let(:logger)        { Logger.new(logged_output) }
   let(:config)        { { test_base_path: '/kitchen' } }
@@ -28,7 +28,7 @@ describe Kitchen::Provisioner::PuppetApply do
   let(:env)           { {} }
   let(:driver) { Kitchen::Driver::Dummy.new }
 
-  let(:provisioner_object) { Kitchen::Provisioner::PuppetApply.new(config) }
+  let(:provisioner_object) { Kitchen::Provisioner::PuppetAgent.new(config) }
 
   # Create Provisioner With Config
   let(:provisioner) do
@@ -51,7 +51,7 @@ describe Kitchen::Provisioner::PuppetApply do
     )
   end
 
-  # Test Puppet Apply Config
+  # Test Puppet Agent Config
   describe 'config' do
     context 'defaults' do
       it 'Should have nil Puppet Version' do
@@ -66,22 +66,6 @@ describe Kitchen::Provisioner::PuppetApply do
         expect(provisioner[:hiera_version]).to eq(nil)
       end
 
-      it 'should not include puppet collections' do
-        expect(provisioner[:require_puppet_collections]).to eq(true)
-      end
-
-      it 'should set yum collections repo' do
-        expect(provisioner[:puppet_yum_collections_repo]).to eq('http://yum.puppetlabs.com/puppet5/puppet-release-el-6.noarch.rpm')
-      end
-
-      it 'should set apt collections repo' do
-        expect(provisioner[:puppet_apt_collections_repo]).to eq('http://apt.puppetlabs.com/puppet5-release-wheezy.deb')
-      end
-
-      it 'should set puppet collections remote path' do
-        expect(provisioner[:puppet_coll_remote_path]).to eq('/opt/puppetlabs')
-      end
-
       it 'Should require Puppet Repo' do
         expect(provisioner[:require_puppet_repo]).to eq(true)
       end
@@ -90,16 +74,8 @@ describe Kitchen::Provisioner::PuppetApply do
         expect(provisioner[:require_chef_for_busser]).to eq(true)
       end
 
-      it 'Should resolve with librarian' do
-        expect(provisioner[:resolve_with_librarian_puppet]).to eq(true)
-      end
-
       it 'Should set puppet environment to nil' do
         expect(provisioner[:puppet_environment]).to eq(nil)
-      end
-
-      it 'Should not install custom facts' do
-        expect(provisioner[:install_custom_facts]).to eq(false)
       end
 
       it 'Should set correct apt repo' do
@@ -142,20 +118,8 @@ describe Kitchen::Provisioner::PuppetApply do
         expect(provisioner[:hiera_data_remote_path]).to eq(nil)
       end
 
-      it 'Should set \'\' as default manifest' do
-        expect(provisioner[:manifest]).to eq('')
-      end
-
       it 'Should fail to find mainfests path' do
         expect(provisioner[:manifests_path]).to eq(nil)
-      end
-
-      it 'Should not ignore additional paths when copying the module under test' do
-        expect(provisioner[:ignored_paths_from_root]).to eq(['spec'])
-      end
-
-      it 'Should find files path' do
-        expect(provisioner[:files_path]).to eq('files')
       end
 
       it 'Should fail to find hiera data path' do
@@ -202,16 +166,8 @@ describe Kitchen::Provisioner::PuppetApply do
         expect(provisioner[:puppet_noop]).to eq(false)
       end
 
-      it "should set puppet platform to ''" do
-        expect(provisioner[:puppet_platform]).to eq(nil)
-      end
-
       it 'should update package repos' do
         expect(provisioner[:update_package_repos]).to eq(true)
-      end
-
-      it 'should not remove puppet repo' do
-        expect(provisioner[:remove_puppet_repo]).to eq(false)
       end
 
       it 'should set custom facts to empty hash' do
@@ -234,32 +190,8 @@ describe Kitchen::Provisioner::PuppetApply do
         expect(provisioner[:librarian_puppet_ssl_file]).to eq(nil)
       end
 
-      it 'should not use hiera eyaml' do
-        expect(provisioner[:hiera_eyaml]).to eq(false)
-      end
-
-      it 'should set hiera eyaml remote path' do
-        expect(provisioner[:hiera_eyaml_key_remote_path]).to eq('/etc/puppet/secure/keys')
-      end
-
       it 'should not find hiera eyaml key path' do
         expect(provisioner[:hiera_eyaml_key_path]).to eq(nil)
-      end
-
-      it 'should set hiera deep merge to false' do
-        expect(provisioner[:hiera_deep_merge]).to eq(false)
-      end
-
-      it 'should not install the hiera package' do
-        expect(provisioner[:install_hiera]).to eq(false)
-      end
-
-      it 'should keep default hiera package name' do
-        expect(provisioner[:hiera_package]).to eq('hiera-puppet')
-      end
-
-      it 'should run puppet with sudo' do
-        expect(provisioner[:puppet_no_sudo]).to eq(false)
       end
     end
 
@@ -529,64 +461,7 @@ describe Kitchen::Provisioner::PuppetApply do
     end
   end
 
-  context 'init command' do
-    it 'should clean spec_files_remote_path' do
-      config[:spec_files_remote_path] = '/etc/puppet/spec'
-      expect(provisioner.init_command).to match(/rm -rf.*#{config[:spec_files_remote_path]}/)
-    end
-  end
-
-  context 'install command' do
-    it 'should return if nil vars are set' do
-      config[:require_puppet_collections] = nil
-      config[:require_puppet_repo] = nil
-      expect(provisioner.install_command).to be_nil
-    end
-
-    it 'runs custom shell command at install stage' do
-      config[:custom_install_command] = 'echo "CUSTOM_SHELL"'
-      expect(provisioner.install_command).to include('echo "CUSTOM_SHELL"')
-    end
-
-    it 'runs multiline custom shell command at install stage' do
-      config[:custom_install_command] = "echo \"string1\"\necho \"string2\""
-      expect(provisioner.install_command).to include(%(echo "string1"\necho "string2"))
-    end
-  end
-
-  context 'run command' do
-    it 'exports FACTERLIB' do
-      config[:facterlib] = '/etc/puppet/facter'
-      expect(provisioner.run_command).to include("export FACTERLIB='/etc/puppet/facter';")
-    end
-
-    it 'exports MANIFESTDIR when not using puppet collections or environments' do
-      config[:require_puppet_collections] = false
-      config[:puppet_environment] = nil
-      expect(provisioner.run_command).to include("export MANIFESTDIR='/tmp/kitchen/manifests';")
-    end
-
-    it 'exports FACTERLIB for facter directory if factor_file specified' do
-      config[:facter_file] = 'facter/hello.rb'
-      expect(provisioner.run_command).to include("export FACTERLIB='/tmp/kitchen/facter';")
-    end
-
-    it 'exports FACTERLIB for facter directory if install_custom_facts is true' do
-      config[:install_custom_facts] = true
-      config[:custom_facts] = { role: 'webserver' }
-      expect(provisioner.run_command).to include("export FACTERLIB='/tmp/kitchen/facter';")
-    end
-
-    it 'exports custom_facts' do
-      config[:custom_facts] = { fact1: 'value1', fact2: 'value2' }
-      expect(provisioner.run_command).to include('export FACTER_fact1=value1 FACTER_fact2=value2;')
-    end
-
-    it 'custom options should appear in run command' do
-      config[:custom_options] = '--no-stringify_facts'
-      expect(provisioner.run_command).to include('--no-stringify_facts')
-    end
-
+  describe 'run_command' do
     it 'whitelists exit code' do
       config[:puppet_whitelist_exit_code] = '2'
       expect(provisioner.run_command).to match(/; RC=\$\?; \[ \$RC -eq 2 \] && exit 0; exit \$RC$/)
@@ -597,40 +472,13 @@ describe Kitchen::Provisioner::PuppetApply do
       expect(provisioner.run_command).to match(/; RC=\$\?; \[ \$RC -eq 2 -o \$RC -eq 4 \] && exit 0; exit \$RC$/)
     end
 
-    it 'can run without sudo' do
-      config[:puppet_no_sudo] = true
-      expect(provisioner.run_command).not_to include('sudo -E')
+    it 'has environment flag' do
+      config[:puppet_environment] = 'dev'
+      expect(provisioner.send(:run_command)).to include('--environment="dev"')
     end
 
-    it 'can run with sudo' do
-      config[:puppet_no_sudo] = false
-      expect(provisioner.run_command).to include('sudo -E')
-    end
-
-    it 'runs custom shell command at pre apply stage' do
-      config[:custom_pre_apply_command] = 'echo "CUSTOM_PRE_APPLY_COMMAND"'
-      expect(provisioner.run_command).to include('echo "CUSTOM_PRE_APPLY_COMMAND"')
-    end
-
-    it 'runs multiline custom shell command at pre apply stage' do
-      config[:custom_pre_apply_command] = "echo \"pre_string1\"\necho \"pre_string2\""
-      expect(provisioner.run_command).to include(%(echo "pre_string1"\necho "pre_string2"))
-    end
-
-    it 'runs custom shell command at post apply stage' do
-      config[:custom_post_apply_command] = 'echo "CUSTOM_POST_APPLY_COMMAND"'
-      expect(provisioner.run_command).to match(/function custom_post_apply_command {\n\s*echo "CUSTOM_POST_APPLY_COMMAND"\n\s*}\n\s*trap custom_post_apply_command EXIT/)
-    end
-
-    it 'runs multiline custom shell command at post apply stage' do
-      config[:custom_post_apply_command] = "echo \"post_string1\"\necho \"post_string2\""
-      expect(provisioner.run_command).to match(/function custom_post_apply_command {\n\s*echo "post_string1"\necho "post_string2"\n+\s*}\n\s*trap custom_post_apply_command EXIT/)
-    end
-
-    it 'does not set a custom shell command at post apply stage trap if :custom_post_apply_command option is empty' do
-      config[:custom_post_apply_command] = nil
-
-      expect(provisioner.run_command).to_not match(/function custom_post_apply_command {\n+\s*}\n\s*trap custom_post_apply_command EXIT/)
+    it 'no environment flag' do
+      expect(provisioner.send(:run_command)).to_not include('--environment="dev"')
     end
   end
 
@@ -640,14 +488,10 @@ describe Kitchen::Provisioner::PuppetApply do
       allow_any_instance_of(Kitchen::Configurable).to receive(:windows_os?).and_return(true)
     end
 
-    it 'exports custom_facts' do
+    # currently windows is not fully supported with puppet_agent
+    xit 'exports custom_facts' do
       config[:custom_facts] = { fact1: 'value1', fact2: 'value2' }
       expect(provisioner.run_command).to include("\$env:FACTER_fact1='value1'; \$env:FACTER_fact2='value2';")
-    end
-
-    it 'custom options should appear in run command' do
-      config[:custom_options] = '--no-stringify_facts'
-      expect(provisioner.run_command).to include('--no-stringify_facts')
     end
 
     it 'does not whitelist exit codes by default' do
@@ -663,137 +507,6 @@ describe Kitchen::Provisioner::PuppetApply do
     it 'whitelists multiple exit codes' do
       config[:puppet_whitelist_exit_code] = %w[2 4]
       expect(provisioner.run_command).to match(/; if\(@\(2, 4\) -contains \$LASTEXITCODE\) {exit 0} else {exit \$LASTEXITCODE}$/)
-    end
-  end
-
-  describe 'protected methods' do
-    context 'When using powershell' do
-      before do
-        allow_any_instance_of(Kitchen::Configurable).to receive(:powershell_shell?).and_return(true)
-        allow_any_instance_of(Kitchen::Configurable).to receive(:windows_os?).and_return(true)
-      end
-
-      describe 'hiera_data_remote_path' do
-        it 'is C:/ProgramData/PuppetLabs/hiera/var when using puppet v3' do
-          config[:require_puppet_collections] = false
-          expect(provisioner.send(:hiera_data_remote_path)).to eq('C:/ProgramData/PuppetLabs/hiera/var')
-        end
-
-        it 'is C:/ProgramData/PuppetLabs/code/environments/production/hieradata when using puppet v4' do
-          config[:require_puppet_collections] = true
-          expect(provisioner.send(:hiera_data_remote_path)).to eq('C:/ProgramData/PuppetLabs/code/environments/production/hieradata')
-        end
-      end
-
-      describe 'puppet_dir' do
-        it 'is C:/ProgramData/PuppetLabs/puppet/etc' do
-          expect(provisioner.send(:puppet_dir)).to eq('C:/ProgramData/PuppetLabs/puppet/etc')
-        end
-        it 'is C:/ProgramData/PuppetLabs/puppet/etc when using puppet collections' do
-          config[:require_puppet_collections] = true
-          expect(provisioner.send(:puppet_dir)).to eq('C:/ProgramData/PuppetLabs/puppet/etc')
-        end
-      end
-
-      describe 'hiera_config_dir' do
-        it 'is C:/ProgramData/PuppetLabs/puppet/etc' do
-          expect(provisioner.send(:hiera_config_dir)).to eq('C:/ProgramData/PuppetLabs/puppet/etc')
-        end
-        it 'is C:/ProgramData/PuppetLabs/puppet/etc when using puppet collections' do
-          config[:require_puppet_collections] = true
-          expect(provisioner.send(:hiera_config_dir)).to eq('C:/ProgramData/PuppetLabs/puppet/etc')
-        end
-      end
-
-      describe 'cp_command' do
-        it 'is cp -force' do
-          expect(provisioner.send(:cp_command)).to eq('cp -force')
-        end
-      end
-
-      describe 'rm_command' do
-        it 'is rm -force -recurse' do
-          expect(provisioner.send(:rm_command)).to eq('rm -force -recurse')
-        end
-      end
-
-      describe 'mkdir_command' do
-        it 'is mkdir -force -path' do
-          expect(provisioner.send(:mkdir_command)).to eq('mkdir -force -path')
-        end
-      end
-
-      describe 'rm_command_paths(path1, path2)' do
-        it 'is rm -force -recurse "path1", "path2"' do
-          expect(provisioner.send(:rm_command_paths, %w[path1 path2])).to eq('rm -force -recurse "path1", "path2"')
-        end
-      end
-
-      describe 'puppet_cmd' do
-        it 'is & "C:\Program Files\Puppet Labs\Puppet\bin\puppet"' do
-          expect(provisioner.send(:puppet_cmd)).to eq('& "C:\Program Files\Puppet Labs\Puppet\bin\puppet"')
-        end
-        it 'is & "C:\Program Files\Puppet Labs\Puppet\bin\puppet" when using puppet collections' do
-          config[:require_puppet_collections] = true
-          expect(provisioner.send(:puppet_cmd)).to eq('& "C:\Program Files\Puppet Labs\Puppet\bin\puppet"')
-        end
-      end
-    end
-
-    context 'When NOT using powershell' do
-      describe 'hiera_data_remote_path' do
-        it 'is /var/lib/hiera when using puppet v3' do
-          config[:require_puppet_collections] = false
-          expect(provisioner.send(:hiera_data_remote_path)).to eq('/var/lib/hiera')
-        end
-
-        it 'is /etc/puppetlabs/code/environments/production/hieradata when using puppet v4' do
-          config[:require_puppet_collections] = true
-          expect(provisioner.send(:hiera_data_remote_path)).to eq('/etc/puppetlabs/code/environments/production/hieradata')
-        end
-      end
-
-      describe 'puppet_dir' do
-        it 'is /etc/puppetlabs/puppet' do
-          expect(provisioner.send(:puppet_dir)).to eq('/etc/puppetlabs/puppet')
-        end
-      end
-
-      describe 'hiera_config_dir' do
-        it 'is /etc/puppetlabs/code' do
-          expect(provisioner.send(:hiera_config_dir)).to eq('/etc/puppetlabs/code')
-        end
-      end
-
-      describe 'cp_command' do
-        it 'is cp' do
-          expect(provisioner.send(:cp_command)).to eq('cp')
-        end
-      end
-
-      describe 'rm_command' do
-        it 'is sudo -E rm -rf' do
-          expect(provisioner.send(:rm_command)).to eq('rm -rf')
-        end
-      end
-
-      describe 'mkdir_command' do
-        it 'is sudo -E mkdir -p' do
-          expect(provisioner.send(:mkdir_command)).to eq('mkdir -p')
-        end
-      end
-
-      describe 'rm_command_paths(path1, path2)' do
-        it 'is sudo -E rm -rf path1 path2' do
-          expect(provisioner.send(:rm_command_paths, %w[path1 path2])).to eq('rm -rf path1 path2')
-        end
-      end
-
-      describe 'puppet_cmd' do
-        it 'is /opt/puppetlabs/bin/puppet' do
-          expect(provisioner.send(:puppet_cmd)).to eq('sudo -E /opt/puppetlabs/bin/puppet')
-        end
-      end
     end
   end
 end

@@ -1,4 +1,5 @@
 # -*- encoding: utf-8 -*-
+
 #
 # Author:: Chris Lundquist (<chris.lundquist@github.com>) Neill Turner (<neillwturner@gmail.com>)
 #
@@ -28,7 +29,7 @@ require 'kitchen/provisioner/puppet/librarian'
 module Kitchen
   class Busser
     def non_suite_dirs
-      %w(data data_bags environments nodes roles puppet)
+      %w[data data_bags environments nodes roles puppet]
     end
   end
 
@@ -45,19 +46,29 @@ module Kitchen
     class PuppetApply < Base
       attr_accessor :tmp_dir
 
-      default_config :require_puppet_collections, false
-      default_config :puppet_yum_collections_repo, 'http://yum.puppetlabs.com/puppetlabs-release-pc1-el-6.noarch.rpm'
-      default_config :puppet_apt_collections_repo, 'http://apt.puppetlabs.com/puppetlabs-release-pc1-wheezy.deb'
+      default_config :require_puppet_collections, true
+      default_config :puppet_yum_collections_repo, 'http://yum.puppetlabs.com/puppet5/puppet-release-el-6.noarch.rpm'
+      default_config :puppet_apt_collections_repo, 'http://apt.puppetlabs.com/puppet5-release-wheezy.deb'
       default_config :puppet_coll_remote_path, '/opt/puppetlabs'
       default_config :puppet_version, nil
       default_config :facter_version, nil
       default_config :hiera_version, nil
       default_config :install_hiera, false
       default_config :hiera_package, 'hiera-puppet'
+      default_config :hiera_writer_files, nil
       default_config :require_puppet_repo, true
       default_config :require_chef_for_busser, true
       default_config :resolve_with_librarian_puppet, true
       default_config :puppet_environment, nil
+      default_config :puppet_environment_config_path do |provisioner|
+        provisioner.calculate_path('environment.conf')
+      end
+      default_config :puppet_environment_remote_modules_path, 'modules'
+      default_config :puppet_environment_remote_manifests_path, 'manifests'
+      default_config :puppet_environment_remote_hieradata_path, 'hieradata'
+      default_config :puppet_environment_hiera_config_path do |provisioner|
+        provisioner.calculate_path('hiera.yaml', :file)
+      end
       default_config :puppet_apt_repo, 'http://apt.puppetlabs.com/puppetlabs-release-precise.deb'
       default_config :puppet_yum_repo, 'https://yum.puppetlabs.com/puppetlabs-release-el-6.noarch.rpm'
       default_config :chef_bootstrap_url, 'https://www.getchef.com/chef/install.sh'
@@ -65,9 +76,10 @@ module Kitchen
       default_config :custom_install_command, nil
       default_config :custom_pre_install_command, nil
       default_config :custom_pre_apply_command, nil
+      default_config :custom_post_apply_command, nil
       default_config :puppet_whitelist_exit_code, nil
       default_config :require_puppet_omnibus, false
-      default_config :puppet_omnibus_url, 'https://raw.githubusercontent.com/petems/puppet-install-shell/master/install_puppet.sh'
+      default_config :puppet_omnibus_url, 'https://raw.githubusercontent.com/petems/puppet-install-shell/master/install_puppet_5_agent.sh'
       default_config :puppet_enc, nil
       default_config :ignore_spec_fixtures, false
 
@@ -78,10 +90,11 @@ module Kitchen
 
       default_config :http_proxy, nil
       default_config :https_proxy, nil
+      default_config :no_proxy, nil
 
-      default_config :ignored_paths_from_root, []
-      default_config :hiera_data_remote_path, '/var/lib/hiera'
-      default_config :manifest, 'site.pp'
+      default_config :ignored_paths_from_root, ['spec']
+      default_config :hiera_data_remote_path, nil
+      default_config :manifest, ''
 
       default_config :manifests_path do |provisioner|
         provisioner.calculate_path('manifests') ||
@@ -109,6 +122,7 @@ module Kitchen
       end
 
       default_config :hiera_config_path do |provisioner|
+        provisioner.calculate_path('hiera.global.yaml', :file) ||
         provisioner.calculate_path('hiera.yaml', :file)
       end
 
@@ -140,6 +154,8 @@ module Kitchen
       default_config :puppet_debug, false
       default_config :puppet_verbose, false
       default_config :puppet_noop, false
+      default_config :puppet_show_diff, false
+      default_config :puppet_future_parser, false
       default_config :platform, &:platform_name
       default_config :update_package_repos, true
       default_config :remove_puppet_repo, false
@@ -152,6 +168,13 @@ module Kitchen
 
       default_config :hiera_eyaml, false
       default_config :hiera_eyaml_key_remote_path, '/etc/puppet/secure/keys'
+      default_config :puppet_environmentpath_remote_path, nil
+
+      default_config :hiera_eyaml_gpg, false
+      default_config :hiera_eyaml_gpg_recipients, false
+      default_config :hiera_eyaml_gpg_secring, false
+      default_config :hiera_eyaml_gpg_pubring, false
+      default_config :hiera_eyaml_gpg_remote_path, '/home/vagrant/.gnupg'
 
       default_config :hiera_eyaml_key_path do |provisioner|
         provisioner.calculate_path('hiera_keys')
@@ -199,6 +222,7 @@ module Kitchen
                 #{install_hiera}
               fi
               #{install_eyaml}
+              #{install_eyaml_gpg}
               #{install_deep_merge}
               #{install_busser}
               #{custom_install_command}
@@ -213,20 +237,26 @@ module Kitchen
                 #{install_puppet_yum_repo}
               fi
               #{install_eyaml}
+              #{install_eyaml_gpg}
               #{install_deep_merge}
               #{install_busser}
               #{custom_install_command}
             INSTALL
           when /^windows.*/
             info("Installing puppet on #{puppet_platform}")
+            info('Powershell is not recognised by core test-kitchen assuming it is present') unless powershell_shell?
             <<-INSTALL
               if(Get-Command puppet -ErrorAction 0) { return; }
-              if( [Environment]::Is64BitOperatingSystem ) {
-                  $MsiUrl = "https://downloads.puppetlabs.com/windows/puppet-#{puppet_windows_version}-x64.msi"
+              $architecture = if( [Environment]::Is64BitOperatingSystem ) { '-x64' } else { '' }
+              if( '#{puppet_windows_version}' -eq 'latest' ) {
+                  $MsiUrl = "https://downloads.puppetlabs.com/windows/puppet-agent-${architecture}-latest.msi"
+              } elseif( '#{puppet_windows_version}' -like '5.*' ) {
+                  $MsiUrl = "https://downloads.puppetlabs.com/windows/puppet5/puppet-agent-#{puppet_windows_version}-${architecture}.msi"
               } else {
-                  $MsiUrl = "https://downloads.puppetlabs.com/windows/puppet-#{puppet_windows_version}.msi"
+                  $MsiUrl = "https://downloads.puppetlabs.com/windows/puppet-#{puppet_windows_version}${architecture}.msi"
               }
-              $process = Start-Process -FilePath msiexec.exe -Wait -PassThru -ArgumentList '/qn', '/norestart', '/i', $MsiUrl
+              Invoke-WebRequest $MsiUrl -UseBasicParsing -OutFile "C:/puppet.msi" #{posh_proxy_parm}
+              $process = Start-Process -FilePath msiexec.exe -Wait -PassThru -ArgumentList '/qn', '/norestart', '/i', 'C:\\puppet.msi'
               if ($process.ExitCode -ne 0) {
                   Write-Host "Installer failed."
                   Exit 1
@@ -259,6 +289,7 @@ module Kitchen
                 fi
               fi
               #{install_eyaml}
+              #{install_eyaml_gpg}
               #{install_deep_merge}
               #{install_busser}
               #{custom_install_command}
@@ -286,6 +317,7 @@ module Kitchen
             #{sudo_env('apt-get')} -y install puppet-agent#{puppet_debian_version}
           fi
           #{install_eyaml("#{config[:puppet_coll_remote_path]}/puppet/bin/gem")}
+          #{install_eyaml_gpg("#{config[:puppet_coll_remote_path]}/puppet/bin/gem")}
           #{install_deep_merge}
           #{install_busser}
           #{custom_install_command}
@@ -295,15 +327,39 @@ module Kitchen
           <<-INSTALL
 
           #{Util.shell_helpers}
+          #{custom_pre_install_command}
           if [ ! -d "#{config[:puppet_coll_remote_path]}" ]; then
-            echo "-----> #{sudo_env('yum')} -y localinstall #{config[:puppet_yum_collections_repo]}"
-            #{sudo_env('yum')} -y localinstall #{config[:puppet_yum_collections_repo]}
+            echo "-----> #{sudo_env('yum')} -y install #{config[:puppet_yum_collections_repo]}"
+            #{sudo_env('yum')} -y install #{config[:puppet_yum_collections_repo]}
             #{sudo_env('yum')} -y install puppet-agent#{puppet_redhat_version}
           fi
           #{install_eyaml("#{config[:puppet_coll_remote_path]}/puppet/bin/gem")}
+          #{install_eyaml_gpg("#{config[:puppet_coll_remote_path]}/puppet/bin/gem")}
           #{install_deep_merge}
           #{install_busser}
           #{custom_install_command}
+          INSTALL
+        when /^windows.*/
+          info("Installing Puppet Collections on #{puppet_platform}")
+          info('Powershell is not recognised by core test-kitchen assuming it is present') unless powershell_shell?
+          <<-INSTALL
+            if(Get-Command puppet -ErrorAction 0) { return; }
+            $architecture = if( [Environment]::Is64BitOperatingSystem ) { 'x64' } else { 'x86' }
+            if( '#{puppet_windows_version}' -eq 'latest' ) {
+                $MsiUrl = "https://downloads.puppetlabs.com/windows/puppet-agent-${architecture}-latest.msi"
+            } elseif( '#{puppet_windows_version}' -like '5.*' ) {
+                $MsiUrl = "https://downloads.puppetlabs.com/windows/puppet5/puppet-agent-#{puppet_windows_version}-${architecture}.msi"
+            } else {
+                $MsiUrl = "https://downloads.puppetlabs.com/windows/puppet-agent-#{puppet_windows_version}${architecture}.msi"
+            }
+            Invoke-WebRequest $MsiUrl -UseBasicParsing -OutFile "C:/puppet-agent.msi" #{posh_proxy_parm}
+            $process = Start-Process -FilePath msiexec.exe -Wait -PassThru -ArgumentList '/qn', '/norestart', '/i', 'C:\\puppet-agent.msi'
+            if ($process.ExitCode -ne 0) {
+                Write-Host "Installer failed."
+                Exit 1
+            }
+
+            #{install_busser}
           INSTALL
         else
           info('Installing Puppet Collections, will try to determine platform os')
@@ -314,8 +370,8 @@ module Kitchen
             if [ ! -d "#{config[:puppet_coll_remote_path]}" ]; then
               if [ -f /etc/centos-release ] || [ -f /etc/redhat-release ] || [ -f /etc/oracle-release ] || \
                  [ -f /etc/system-release ] || [ grep -q 'Amazon Linux' /etc/system-release ]; then
-                echo "-----> #{sudo_env('yum')} -y localinstall #{config[:puppet_yum_collections_repo]}"
-                #{sudo_env('yum')} -y localinstall #{config[:puppet_yum_collections_repo]}
+                echo "-----> #{sudo_env('yum')} -y install #{config[:puppet_yum_collections_repo]}"
+                #{sudo_env('yum')} -y install #{config[:puppet_yum_collections_repo]}
                 #{sudo_env('yum')} -y install puppet-agent#{puppet_redhat_version}
               else
                 #{sudo('apt-get')} -y install wget
@@ -326,6 +382,7 @@ module Kitchen
               fi
             fi
             #{install_eyaml("#{config[:puppet_coll_remote_path]}/puppet/bin/gem")}
+            #{install_eyaml_gpg("#{config[:puppet_coll_remote_path]}/puppet/bin/gem")}
             #{install_deep_merge}
             #{install_busser}
             #{custom_install_command}
@@ -356,6 +413,20 @@ module Kitchen
         INSTALL
       end
 
+      def install_eyaml_gpg(gem_cmd = 'gem')
+        return unless config[:hiera_eyaml_gpg]
+        <<-INSTALL
+          # A backend for Hiera that provides per-value asymmetric encryption of sensitive data
+          if [[ $(#{sudo(gem_cmd)} list hiera-eyaml-gpg -i) == 'false' ]]; then
+            echo '-----> Installing hiera-eyaml-gpg to provide encryption of hiera data'
+            #{sudo(gem_cmd)} install #{gem_proxy_parm} --no-ri --no-rdoc highline -v 1.6.21
+            #{sudo(gem_cmd)} install #{gem_proxy_parm} --no-ri --no-rdoc hiera-eyaml
+            #{sudo(gem_cmd)} install #{gem_proxy_parm} --no-ri --no-rdoc hiera-eyaml-gpg
+            #{sudo(gem_cmd)} install #{gem_proxy_parm} --no-ri --no-rdoc ruby_gpg
+          fi
+        INSTALL
+      end
+
       def install_busser
         return unless config[:require_chef_for_busser]
         info("Install busser on #{puppet_platform}")
@@ -381,6 +452,7 @@ module Kitchen
             echo '-----> Installing Chef Omnibus to install busser to run tests'
             #{export_http_proxy_parm}
             #{export_https_proxy_parm}
+            #{export_no_proxy_parm}
             do_download #{chef_url} /tmp/install.sh
             #{sudo('sh')} /tmp/install.sh
           fi
@@ -400,6 +472,7 @@ module Kitchen
           echo "-----> Installing Puppet Omnibus"
           #{export_http_proxy_parm}
           #{export_https_proxy_parm}
+          #{export_no_proxy_parm}
           do_download #{config[:puppet_omnibus_url]} /tmp/install_puppet.sh
           #{sudo_env('sh')} /tmp/install_puppet.sh #{version}
         fi
@@ -465,14 +538,15 @@ module Kitchen
       end
 
       def init_command
-        todelete = %w(modules manifests files hiera hiera.yaml facter spec enc)
+        todelete = %w[modules manifests files hiera hiera.yaml hiera.global.yaml facter spec enc environment]
                    .map { |dir| File.join(config[:root_path], dir) }
         todelete += [hiera_data_remote_path,
                      '/etc/hiera.yaml',
                      "#{puppet_dir}/hiera.yaml",
                      spec_files_remote_path.to_s,
                      "#{puppet_dir}/fileserver.conf"]
-        todelete += File.join(puppet_dir, config[:puppet_environment]) if config[:puppet_environment]
+        todelete << File.join(puppet_dir, puppet_environment) if puppet_environment
+        todelete << File.join(puppet_environmentpath_remote_path, puppet_environment) if puppet_environment_config && puppet_environment
         cmd = "#{sudo(rm_command_paths(todelete))};"
         cmd += " #{mkdir_command} #{config[:root_path]};"
         cmd += " #{sudo(mkdir_command)} #{puppet_dir}"
@@ -491,6 +565,7 @@ module Kitchen
         prepare_facts
         prepare_puppet_config
         prepare_hiera_config
+        prepare_puppet_environment
         prepare_fileserver_config
         prepare_hiera_data
         prepare_enc
@@ -546,16 +621,6 @@ module Kitchen
           ].join(' ')
         end
 
-        if hiera_config
-          commands << [
-            sudo(cp_command), File.join(config[:root_path], 'hiera.yaml'), '/etc/'
-          ].join(' ')
-
-          commands << [
-            sudo(cp_command), File.join(config[:root_path], 'hiera.yaml'), hiera_config_dir
-          ].join(' ')
-        end
-
         if fileserver_config
           commands << [
             sudo(cp_command),
@@ -564,13 +629,7 @@ module Kitchen
           ].join(' ')
         end
 
-        if hiera_data && hiera_data_remote_path == '/var/lib/hiera'
-          commands << [
-            sudo("#{cp_command} -r"), File.join(config[:root_path], 'hiera'), '/var/lib/'
-          ].join(' ')
-        end
-
-        if hiera_data && hiera_data_remote_path != '/var/lib/hiera'
+        if hiera_data
           commands << [
             sudo(mkdir_command), hiera_data_remote_path
           ].join(' ')
@@ -588,9 +647,48 @@ module Kitchen
           ].join(' ')
         end
 
+        if hiera_eyaml_gpg
+          commands << [
+            sudo('mkdir -p'), hiera_eyaml_gpg_remote_path
+          ].join(' ')
+          commands << [
+            sudo('cp -r'), File.join(config[:root_path], hiera_eyaml_gpg_recipients), hiera_eyaml_gpg_remote_path
+          ].join(' ')
+          commands << [
+            sudo('cp -r'), File.join(config[:root_path], hiera_eyaml_gpg_secring), hiera_eyaml_gpg_remote_path
+          ].join(' ')
+          commands << [
+            sudo('cp -r'), File.join(config[:root_path], hiera_eyaml_gpg_pubring), hiera_eyaml_gpg_remote_path
+          ].join(' ')
+        end
+
         if puppet_environment
           commands << [
-            sudo('ln -s '), config[:root_path], File.join(puppet_dir, config[:puppet_environment])
+            sudo('ln -s '), config[:root_path], File.join(puppet_dir, puppet_environment)
+          ].join(' ')
+        end
+
+        if puppet_environment_config && puppet_environment
+          commands << [
+            sudo(mkdir_command), puppet_environmentpath_remote_path
+          ].join(' ')
+          commands << [
+            sudo(mkdir_command), File.join(puppet_environmentpath_remote_path, puppet_environment)
+          ].join(' ')
+          commands << [
+            sudo('ln -s '), File.join(config[:root_path], 'modules'), File.join(puppet_environmentpath_remote_path, puppet_environment, puppet_environment_remote_modules_path)
+          ].join(' ')
+          commands << [
+            sudo('ln -s '), File.join(config[:root_path], 'manifests'), File.join(puppet_environmentpath_remote_path, puppet_environment, puppet_environment_remote_manifests_path)
+          ].join(' ')
+          commands << [
+            sudo('ln -s '), File.join(config[:root_path], 'hiera'), File.join(puppet_environmentpath_remote_path, puppet_environment, puppet_environment_remote_hieradata_path)
+          ].join(' ')
+          commands << [
+            sudo('cp'), File.join(config[:root_path], 'environment', 'environment.conf'), File.join(puppet_environmentpath_remote_path, puppet_environment, 'environment.conf')
+          ].join(' ')
+          commands << [
+            sudo('cp'), File.join(config[:root_path], 'environment', 'hiera.yaml'), File.join(puppet_environmentpath_remote_path, puppet_environment, 'hiera.yaml')
           ].join(' ')
         end
 
@@ -609,43 +707,51 @@ module Kitchen
           ].join(' ')
         end
 
-        command = powershell_shell? ? commands.join('; ') : commands.join(' && ')
+        command = powershell? ? commands.join('; ') : commands.join(' && ')
         debug(command)
         command
       end
+      # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
       def run_command
-        if !config[:puppet_apply_command].nil?
-          return config[:puppet_apply_command]
-        else
-          result = [
-            facterlib,
-            custom_facts,
-            puppet_manifestdir,
-            puppet_cmd,
-            'apply',
-            File.join(config[:root_path], 'manifests', manifest),
-            "--modulepath=#{File.join(config[:root_path], 'modules')}",
-            "--fileserverconfig=#{File.join(config[:root_path], 'fileserver.conf')}",
-            custom_options,
-            puppet_environment_flag,
-            puppet_noop_flag,
-            puppet_enc_flag,
-            puppet_detailed_exitcodes_flag,
-            puppet_verbose_flag,
-            puppet_debug_flag,
-            puppet_logdest_flag,
-            puppet_whitelist_exit_code
-          ].join(' ')
-          if config[:custom_pre_apply_command]
-            result = <<-RUN
-              #{config[:custom_pre_apply_command]}
-              #{result}
-            RUN
-          end
-          info("Going to invoke puppet apply with: #{result}")
-          result
+        return config[:puppet_apply_command] unless config[:puppet_apply_command].nil?
+        result = [
+          facterlib,
+          custom_facts,
+          puppet_manifestdir,
+          puppet_cmd,
+          'apply',
+          File.join(config[:root_path], 'manifests', manifest),
+          "--modulepath=#{File.join(config[:root_path], 'modules')}",
+          "--fileserverconfig=#{File.join(config[:root_path], 'fileserver.conf')}",
+          custom_options,
+          puppet_environment_flag,
+          puppet_noop_flag,
+          puppet_enc_flag,
+          puppet_hiera_flag,
+          puppet_detailed_exitcodes_flag,
+          puppet_verbose_flag,
+          puppet_debug_flag,
+          puppet_logdest_flag,
+          puppet_future_parser_flag,
+          puppet_show_diff_flag,
+          puppet_whitelist_exit_code
+        ].join(' ')
+        if config[:custom_post_apply_command]
+          custom_post_apply_trap = <<-TRAP
+            function custom_post_apply_command {
+              #{config[:custom_post_apply_command]}
+            }
+            trap custom_post_apply_command EXIT
+          TRAP
         end
+        result = <<-RUN
+          #{config[:custom_pre_apply_command]}
+          #{custom_post_apply_trap}
+          #{result}
+        RUN
+        info("Going to invoke puppet apply with: #{result}")
+        result
       end
 
       protected
@@ -697,6 +803,25 @@ module Kitchen
         config[:puppet_environment]
       end
 
+      def puppet_environment_config
+        if config[:puppet_environment_config_path] && !puppet_environment
+          raise("ERROR: found environment config '#{config[:puppet_environment_config_path]}', however no 'puppet_environment' is specified. Please specify 'puppet_environment' or unset 'puppet_environment_config_path' in .kitchen.yml")
+        end
+        config[:puppet_environment_config_path]
+      end
+
+      def puppet_environment_remote_modules_path
+        config[:puppet_environment_remote_modules_path]
+      end
+
+      def puppet_environment_remote_manifests_path
+        config[:puppet_environment_remote_manifests_path]
+      end
+
+      def puppet_environment_remote_hieradata_path
+        config[:puppet_environment_remote_hieradata_path]
+      end
+
       def puppet_git_init
         config[:puppet_git_init]
       end
@@ -709,6 +834,10 @@ module Kitchen
         config[:hiera_config_path]
       end
 
+      def puppet_environment_hiera_config
+        config[:puppet_environment_hiera_config_path]
+      end
+
       def fileserver_config
         config[:fileserver_config_path]
       end
@@ -718,11 +847,41 @@ module Kitchen
       end
 
       def hiera_data_remote_path
-        config[:hiera_data_remote_path]
+        return config[:hiera_data_remote_path] if config[:hiera_data_remote_path]
+
+        if config[:require_puppet_collections]
+          powershell? ? 'C:/ProgramData/PuppetLabs/code/environments/production/hieradata' : '/etc/puppetlabs/code/environments/production/hieradata'
+        else
+          powershell? ? 'C:/ProgramData/PuppetLabs/hiera/var' : '/var/lib/hiera'
+        end
+      end
+
+      def hiera_writer
+        config[:hiera_writer_files]
       end
 
       def hiera_eyaml
         config[:hiera_eyaml]
+      end
+
+      def hiera_eyaml_gpg
+        config[:hiera_eyaml_gpg]
+      end
+
+      def hiera_eyaml_gpg_recipients
+        config[:hiera_eyaml_gpg_recipients]
+      end
+
+      def hiera_eyaml_gpg_secring
+        config[:hiera_eyaml_gpg_secring]
+      end
+
+      def hiera_eyaml_gpg_pubring
+        config[:hiera_eyaml_gpg_pubring]
+      end
+
+      def hiera_eyaml_gpg_remote_path
+        config[:hiera_eyaml_gpg_remote_path]
       end
 
       def hiera_eyaml_key_path
@@ -742,10 +901,9 @@ module Kitchen
       end
 
       def puppet_cmd
-        puppet_bin = powershell_shell? ? '& "C:\Program Files\Puppet Labs\Puppet\bin\puppet"' : 'puppet'
-        if config[:require_puppet_collections]
-          puppet_bin = "#{config[:puppet_coll_remote_path]}/bin/puppet"
-        end
+        return '& "C:\Program Files\Puppet Labs\Puppet\bin\puppet"' if powershell?
+
+        puppet_bin = config[:require_puppet_collections] ? "#{config[:puppet_coll_remote_path]}/bin/puppet" : 'puppet'
 
         if config[:puppet_no_sudo]
           puppet_bin
@@ -755,15 +913,22 @@ module Kitchen
       end
 
       def puppet_dir
-        return '/etc/puppetlabs/puppet' if config[:require_puppet_collections]
-        return '/etc/puppet' unless powershell_shell?
-        'C:/ProgramData/PuppetLabs/puppet/etc'
+        return 'C:/ProgramData/PuppetLabs/puppet/etc' if powershell?
+        config[:require_puppet_collections] ? '/etc/puppetlabs/puppet' : '/etc/puppet'
+      end
+
+      def puppet_environmentpath_remote_path
+        return config[:puppet_environmentpath_remote_path] if config[:puppet_environmentpath_remote_path]
+        if config[:puppet_version] =~ /^3/
+          powershell? ? 'C:/ProgramData/PuppetLabs/puppet/etc' : '/etc/puppet/environments'
+        else
+          powershell? ? 'C:/ProgramData/PuppetLabs/code/environments' : '/etc/puppetlabs/code/environments'
+        end
       end
 
       def hiera_config_dir
-        return '/etc/puppetlabs/code' if config[:require_puppet_collections]
-        return '/etc/puppet' unless powershell_shell?
-        'C:/ProgramData/PuppetLabs/puppet/etc'
+        return 'C:/ProgramData/PuppetLabs/puppet/etc' if powershell?
+        config[:require_puppet_collections] ? '/etc/puppetlabs/code' : '/etc/puppet'
       end
 
       def puppet_debian_version
@@ -787,21 +952,21 @@ module Kitchen
       end
 
       def puppet_windows_version
-        config[:puppet_version] ? config[:puppet_version].to_s : '3.8.6'
+        config[:puppet_version] ? config[:puppet_version].to_s : 'latest'
       end
 
       def puppet_environment_flag
         if config[:puppet_version] =~ /^2/
-          config[:puppet_environment] ? "--environment=#{config[:puppet_environment]}" : nil
+          config[:puppet_environment] ? "--environment=#{puppet_environment}" : nil
         else
-          config[:puppet_environment] ? "--environment=#{config[:puppet_environment]} --environmentpath=#{puppet_dir}" : nil
+          config[:puppet_environment] ? "--environment=#{puppet_environment} --environmentpath=#{puppet_environmentpath_remote_path}" : nil
         end
       end
 
       def puppet_manifestdir
         return nil if config[:require_puppet_collections]
         return nil if config[:puppet_environment]
-        return nil if powershell_shell?
+        return nil if powershell?
         bash_vars = "export MANIFESTDIR='#{File.join(config[:root_path], 'manifests')}';"
         debug(bash_vars)
         bash_vars
@@ -821,6 +986,14 @@ module Kitchen
 
       def puppet_verbose_flag
         config[:puppet_verbose] ? '-v' : nil
+      end
+
+      def puppet_show_diff_flag
+        config[:puppet_show_diff] ? '--show_diff' : nil
+      end
+
+      def puppet_future_parser_flag
+        config[:puppet_future_parser] ? '--parser=future' : nil
       end
 
       def puppet_logdest_flag
@@ -848,7 +1021,8 @@ module Kitchen
       def sudo_env(pm)
         s = https_proxy ? "https_proxy=#{https_proxy}" : nil
         p = http_proxy ? "http_proxy=#{http_proxy}" : nil
-        p || s ? "#{sudo('env')} #{p} #{s} #{pm}" : sudo(pm).to_s
+        n = no_proxy ? "no_proxy=#{no_proxy}" : nil
+        p || s ? "#{sudo('env')} #{p} #{s} #{n} #{pm}" : sudo(pm).to_s
       end
 
       def remove_puppet_repo
@@ -863,9 +1037,10 @@ module Kitchen
         config[:spec_files_remote_path]
       end
 
+      # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
       def facterlib
         factpath = nil
-        factpath = File.join(config[:root_path], 'facter').to_s if config[:install_custom_facts] && !config[:custom_facts].none?
+        factpath = File.join(config[:root_path], 'facter').to_s if config[:install_custom_facts] && config[:custom_facts].any?
         factpath = File.join(config[:root_path], 'facter').to_s if config[:facter_file]
         factpath = "#{factpath}:" if config[:facterlib] && !factpath.nil?
         factpath = "#{factpath}#{config[:facterlib]}" if config[:facterlib]
@@ -874,11 +1049,12 @@ module Kitchen
         debug(bash_vars)
         bash_vars
       end
+      # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
       def custom_facts
         return nil if config[:custom_facts].none?
         return nil if config[:install_custom_facts]
-        if powershell_shell?
+        if powershell?
           environment_vars = config[:custom_facts].map { |k, v| "$env:FACTER_#{k}='#{v}'" }.join('; ')
           environment_vars = "#{environment_vars};"
         else
@@ -893,6 +1069,10 @@ module Kitchen
         config[:puppet_enc] ? "--node_terminus=exec --external_nodes=#{config[:root_path]}/enc/#{File.basename(config[:puppet_enc])}" : nil
       end
 
+      def puppet_hiera_flag
+        hiera_config ? "--hiera_config=#{config[:root_path]}/hiera.global.yaml" : nil
+      end
+
       def puppet_detailed_exitcodes_flag
         config[:puppet_detailed_exitcodes] ? '--detailed-exitcodes' : nil
       end
@@ -903,14 +1083,15 @@ module Kitchen
 
       def puppet_whitelist_exit_code
         if config[:puppet_whitelist_exit_code].nil?
-          return powershell_shell? ? '; exit $LASTEXITCODE' : nil
-        elsif powershell_shell?
-          return "; if(@(#{[config[:puppet_whitelist_exit_code]].join(', ')}) -contains $LASTEXITCODE) {exit 0} else {exit $LASTEXITCODE}"
+          powershell? ? '; exit $LASTEXITCODE' : nil
+        elsif powershell?
+          "; if(@(#{[config[:puppet_whitelist_exit_code]].join(', ')}) -contains $LASTEXITCODE) {exit 0} else {exit $LASTEXITCODE}"
         else
-          return "; [ $? -eq #{config[:puppet_whitelist_exit_code]} ] && exit 0"
+          '; RC=$?; [ ' + [config[:puppet_whitelist_exit_code]].flatten.map { |x| "\$RC -eq #{x}" }.join(' -o ') + ' ] && exit 0; exit $RC'
         end
       end
 
+      # rubocop:disable Metrics/CyclomaticComplexity
       def puppet_apt_repo
         platform_version = config[:platform].partition('-')[2]
         case puppet_platform
@@ -949,6 +1130,7 @@ module Kitchen
           false
         end
       end
+      # rubocop:enable Metrics/CyclomaticComplexity
 
       def puppet_apt_repo_file
         puppet_apt_repo.split('/').last if puppet_apt_repo
@@ -967,13 +1149,26 @@ module Kitchen
       end
 
       def gem_proxy_parm
-        http_proxy ? "--http-proxy #{http_proxy}" : nil
+        p = http_proxy ? "--http-proxy #{http_proxy}" : nil
+        n = no_proxy ? "--no-http-proxy #{no_proxy}" : nil
+        p || n ? "#{p} #{n}" : nil
       end
 
       def wget_proxy_parm
         p = http_proxy ? "-e http_proxy=#{http_proxy}" : nil
         s = https_proxy ? "-e https_proxy=#{https_proxy}" : nil
-        p || s ? "-e use_proxy=yes #{p} #{s}" : nil
+        n = no_proxy ? "-e no_proxy=#{no_proxy}" : nil
+        p || s ? "-e use_proxy=yes #{p} #{s} #{n}" : nil
+      end
+
+      def posh_proxy_parm
+        http_proxy ? "-Proxy #{http_proxy}" : nil
+      end
+
+      def powershell?
+        return true if powershell_shell?
+        return true if puppet_platform =~ /^windows.*/
+        false
       end
 
       def export_http_proxy_parm
@@ -981,7 +1176,11 @@ module Kitchen
       end
 
       def export_https_proxy_parm
-        http_proxy ? "export https_proxy=#{http_proxy}" : nil
+        https_proxy ? "export https_proxy=#{https_proxy}" : nil
+      end
+
+      def export_no_proxy_parm
+        no_proxy ? "export no_proxy=#{no_proxy}" : nil
       end
 
       def http_proxy
@@ -990,6 +1189,10 @@ module Kitchen
 
       def https_proxy
         config[:https_proxy]
+      end
+
+      def no_proxy
+        config[:no_proxy]
       end
 
       def chef_url
@@ -1034,78 +1237,86 @@ module Kitchen
         facter_dir = File.join(sandbox_path, 'facter')
         FileUtils.mkdir_p(facter_dir)
         tmp_facter_file = File.join(facter_dir, 'kitchen.rb')
-        facter_facts = Hash[config[:custom_facts].map { |k, v| [k.to_s, v.to_s] }]
+        facter_facts = Hash[config[:custom_facts]]
         File.open(tmp_facter_file, 'a') do |out|
           facter_facts.each do |k, v|
             out.write "\nFacter.add(:#{k}) do\n"
             out.write "  setcode do\n"
-            out.write "    \"#{v}\"\n"
+            if [Array, Hash].include? v.class
+              out.write "    #{v}\n"
+            else
+              out.write "    \"#{v}\"\n"
+            end
             out.write "  end\n"
             out.write "end\n"
           end
         end
       end
 
+      # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
       def prepare_modules
         info('Preparing modules')
 
         FileUtils.mkdir_p(tmpmodules_dir)
         resolve_with_librarian if File.exist?(puppetfile) && config[:resolve_with_librarian_puppet]
+        modules_to_copy = {}
 
-        if modules && modules.include?(':')
-          debug('Found multiple directories in module path merging.....')
+        # If root dir (.) is a module, add it for copying
+        self_name = read_self_module_name
+        modules_to_copy[self_name] = '.' if self_name
+
+        if modules
           modules_array = modules.split(':')
-          modules_array.each do |m|
-            copy_modules(m, tmpmodules_dir)
+          modules_array.each do |m_path|
+            Dir.glob("#{m_path}/*").each do |m|
+              name = File.basename(m)
+              if modules_to_copy.include? name
+                debug("Found duplicated module: #{name}. The path taking precedence: '#{modules_to_copy[name]}', ignoring '#{m}'")
+              else
+                modules_to_copy[name] = m
+              end
+            end
           end
-        elsif modules
-          copy_modules(modules, tmpmodules_dir)
+        end
+
+        if modules_to_copy.empty?
+          info 'Nothing to do for modules'
         else
-          info 'nothing to do for modules'
+          copy_modules(modules_to_copy, tmpmodules_dir)
         end
-
-        copy_self_as_module
       end
+      # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
-      def copy_modules(source, destination)
-        return unless File.directory?(source)
-
-        debug("Copying modules from #{source} to #{destination}")
-
-        excluded_paths = %w(modules spec pkg) + config[:ignored_paths_from_root]
-
-        Dir.glob("#{source}/*").each do |f|
-          module_name = File.basename(f)
-          target = "#{destination}/#{module_name}"
+      def copy_modules(modules, destination)
+        excluded_paths = %w[modules pkg] + config[:ignored_paths_from_root]
+        debug("Copying modules to directory: #{destination}")
+        modules.each do |name, source|
+          next unless File.directory?(source)
+          debug("Copying module #{name} from #{source}...")
+          target = "#{destination}/#{name}"
           FileUtils.mkdir_p(target) unless File.exist? target
-          FileUtils.cp_r(Dir.glob("#{source}/#{module_name}/*").reject { |entry| entry =~ /#{excluded_paths.join('$|')}$/ }, target, remove_destination: true)
+          FileUtils.cp_r(
+            Dir.glob("#{source}/*").reject { |entry| entry =~ /#{excluded_paths.join('$|')}$/ },
+            target,
+            remove_destination: true
+          )
         end
       end
 
-      def copy_self_as_module
+      def read_self_module_name
         if File.exist?(modulefile)
-          warn('Modulefile found but this is depricated, ignoring it, see https://tickets.puppetlabs.com/browse/PUP-1188')
+          warn('Modulefile found but this is deprecated, ignoring it, see https://tickets.puppetlabs.com/browse/PUP-1188')
         end
 
         return unless File.exist?(metadata_json)
         module_name = nil
         begin
           module_name = JSON.parse(IO.read(metadata_json))['name'].split('-').last
-        rescue
-          error("not able to load or parse #{metadata_json_path} for the name of the module")
+        rescue JSON::ParserError
+          error("not able to load or parse #{metadata_json} for the name of the module")
         end
 
-        return unless module_name
-        module_target_path = File.join(sandbox_path, 'modules', module_name)
-        FileUtils.mkdir_p(module_target_path)
-
-        excluded_paths = %w(modules spec pkg) + config[:ignored_paths_from_root]
-
-        FileUtils.cp_r(
-          Dir.glob(File.join(config[:kitchen_root], '*')).reject { |entry| entry =~ /#{excluded_paths.join('$|')}$/ },
-          module_target_path,
-          remove_destination: true
-        )
+        module_name
       end
 
       def prepare_puppet_config
@@ -1125,13 +1336,29 @@ module Kitchen
         FileUtils.cp_r(config[:puppet_enc], File.join(enc_dir, '/'))
       end
 
+      def prepare_puppet_environment
+        return unless puppet_environment_config
+
+        info('Preparing Environment Config')
+        environment_dir = File.join(sandbox_path, 'environment')
+        FileUtils.mkdir_p(environment_dir)
+        debug("Using Environment Config environment.conf from #{puppet_environment_config}")
+        FileUtils.cp_r(puppet_environment_config, File.join(environment_dir, 'environment.conf'))
+        if puppet_environment_hiera_config
+          debug("Using Environment Hiera Config hiera.yaml from #{puppet_environment_hiera_config}")
+          FileUtils.cp_r(puppet_environment_hiera_config, File.join(environment_dir, 'hiera.yaml'))
+        else
+          info('No Environment hiera.yaml found')
+        end
+      end
+
       def prepare_hiera_config
         return unless hiera_config
 
-        info('Preparing hiera')
+        info('Preparing hiera (global layer)')
         debug("Using hiera from #{hiera_config}")
 
-        FileUtils.cp_r(hiera_config, File.join(sandbox_path, 'hiera.yaml'))
+        FileUtils.cp_r(hiera_config, File.join(sandbox_path, 'hiera.global.yaml'))
       end
 
       def prepare_fileserver_config
@@ -1150,6 +1377,19 @@ module Kitchen
         debug("Copying hiera data from #{hiera_data} to #{tmp_hiera_dir}")
         FileUtils.mkdir_p(tmp_hiera_dir)
         FileUtils.cp_r(Dir.glob("#{hiera_data}/*"), tmp_hiera_dir)
+        if hiera_writer
+          hiera_writer.each do |file|
+            file.each do |filename, hiera_hash|
+              debug("Creating hiera yaml file #{tmp_hiera_dir}/#{filename}")
+              dir = File.join(tmp_hiera_dir, File.dirname(filename.to_s))
+              FileUtils.mkdir_p(dir)
+              output_file = open(File.join(dir, File.basename(filename.to_s)), 'w')
+              # convert json and back before converting to yaml to recursively convert symbols to strings, heh
+              output_file.write JSON[hiera_hash.to_json].to_yaml
+              output_file.close
+            end
+          end
+        end
         return unless hiera_eyaml_key_path
         tmp_hiera_key_dir = File.join(sandbox_path, 'hiera_keys')
         debug("Copying hiera eyaml keys from #{hiera_eyaml_key_path} to #{tmp_hiera_key_dir}")
@@ -1176,23 +1416,23 @@ module Kitchen
       end
 
       def cp_command
-        return 'cp -force' if powershell_shell?
+        return 'cp -force' if powershell?
         'cp'
       end
 
       def rm_command
-        return 'rm -force -recurse' if powershell_shell?
+        return 'rm -force -recurse' if powershell?
         'rm -rf'
       end
 
       def mkdir_command
-        return 'mkdir -force -path' if powershell_shell?
+        return 'mkdir -force -path' if powershell?
         'mkdir -p'
       end
 
       def rm_command_paths(paths)
         return :nil if paths.length.zero?
-        return "#{rm_command} \"#{paths.join('", "')}\"" if powershell_shell?
+        return "#{rm_command} \"#{paths.join('", "')}\"" if powershell?
         "#{rm_command} #{paths.join(' ')}"
       end
     end

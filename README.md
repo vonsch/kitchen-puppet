@@ -7,48 +7,39 @@
 # kitchen-puppet
 A Test Kitchen Provisioner for Puppet
 
-The providers supports both puppet apply and puppet agent clients
+The providers supports both puppet apply and puppet agent clients and puppet bolt.
 
 The PuppetApply provider works by passing the puppet repository based on attributes in .kitchen.yml & calling puppet apply.
 
 The PuppetAgent provider works by passing the puppetmaster and other attributes in .kitchen.yml & calling puppet agent.
 
+The PuppetBolt provider works by passing the puppet bolt commands based on attributes in .kitchen.yml & calling puppet bolt.
 
-This provider has been tested against the Ubuntu 1204 and Centos 6.5 boxes running in vagrant/virtualbox as well as various docker .
 
-## Windows Workstation Install
-You need to download the puppet msi and install it and run everything inside the puppet window.
 
-1. Download and install puppet from the windows msi file from https://downloads.puppetlabs.com/windows
-  * I recommend the using the 32 bit version as not all ruby gems works with the 64 bit version.
-  * Don't do a 'gem install puppet' !!!.
+This provider has been tested against the Ubuntu 1604 and Centos 7 boxes running in docker and vagrant/virtualbox.
 
-2. Select "Start Command Prompt with Puppet" to go to a Command Window.
+## Template
 
-3. Install the Ruby DevKit:
-   * Download and install devkit from http://rubyinstaller.org/downloads
-     * (Use a 32 or 64 bit version that matches version of the ruby install)
-   * In the devkit directory run “ruby dk.rb init”.
-   * Edit the config.yml generated and add the the path of the ruby install for puppet
-     * (it will be <install dir of puppet>/sys/ruby).
-   * Run “ruby dk.rb install” to bind it to the puppet ruby installation.
+Template project for using kitchen for puppet development:
 
-4. From a Command prompt:
-  * gem install librarian-puppet
-  * gem install test-kitchen
-  * gem install kitchen-puppet
+https://github.com/scoopex/puppet-kitchen_template
 
-## Mac-OSX Workstation Install
+## Resources
+* http://ehaselwanter.com/en/blog/2014/05/08/using-test-kitchen-with-puppet
+* http://www.slideshare.net/MartinEtmajer/testdriven-infrastructure-with-puppet-test-kitchen-serverspec-and-rspec
+* http://www.slideshare.net/YuryTsarev/containercon-test-driven-infrastructure
+* http://events.linuxfoundation.org/sites/events/files/slides/ContainerCon%20-%20Test%20Driven%20Infrastructure_0.pdf
+* https://www.cedric-meury.ch/2016/10/test-driven-infrastructure-with-puppet-docker-test-kitchen-and-serverspec-yury-tsarev-gooddata
+* https://docs.puppet.com/puppet/latest/puppet_platform.html
 
-1. Download and install the mac packages from https://downloads.puppetlabs.com/mac/
-  * The most recent Facter package (facter-<VERSION>.dmg)
-  * The most recent Hiera package (hiera-<VERSION>.dmg)
-  * The most recent Puppet package (puppet-<VERSION>.dmg)
-  * See [How to Install Software from DMG Files on a Mac](http://www.ofzenandcomputing.com/how-to-install-dmg-files-mac/) for details.
+## Install
+
+1. install the latest Ruby on your workstations (for windows see https://rubyinstaller.org/downloads/)
 
 2. From a Command prompt:
   * gem install librarian-puppet
-  * gem install test-kitchen
+  * gem install test-kitchen  (or gem install test-kitchen -v 1.16.0 if using ruby version less than 2.3)
   * gem install kitchen-puppet
 
 ## Requirements
@@ -69,7 +60,49 @@ There is windows/winrm support, currently not all functionality is supported.
 
 Sample Puppet Repositories
   * A sample hello world example puppet repository: https://github.com/neillturner/puppet_windows_repo
+  * A sample hello world example puppet repository for vagrant: https://github.com/neillturner/puppet_vagrant_windows_repo
   * A more extensive sample installing virtualbox on windows: https://github.com/red-gate/puppet-virtualbox_windows
+
+## Using Environments
+
+In the root directory for your puppet repository:
+
+Create a `.kitchen.yml`, much like one the described above:
+
+```yaml
+    ---
+    driver:
+      name: vagrant
+
+    provisioner:
+      name: puppet_apply
+      puppet_environment: dev
+# the puppet environmnt files can be in this repository
+      puppet_environment_config_path: environment/dev/environment.conf
+      manifests_path:  environment/dev/manifests
+      modules_path: environment/dev/modules_mycompany
+# or external to this repository as long as they are accessible
+#     puppet_environment_config_path: /my_environments/dev/environment.conf
+#     manifests_path:                 /my_environments/dev/manifests
+#     modules_path:                   /my_environments/dev/modules_mycompany
+      hiera_data_path: /repository/puppet_repo/hieradata
+
+    platforms:
+    - name: nocm_ubuntu-12.04
+      driver_plugin: vagrant
+      driver_config:
+        box: nocm_ubuntu-12.04
+        box_url: http://puppet-vagrant-boxes.puppetlabs.com/ubuntu-server-12042-x64-vbox4210-nocm.box
+
+    suites:
+     - name: default
+```
+
+Sample Puppet Repositories
+  * A sample hello world example puppet repository with docker : https://github.com/neillturner/puppet_docker_repo
+  * A sample hello world example puppet repository without environents : https://github.com/neillturner/puppet_vagrant_repo
+  * A sample hello world example puppet repository with environents : https://github.com/neillturner/puppet_vagrant_environment_repo
+  * A sample puppet bolt example puppet repository with docker : https://github.com/neillturner/bolt_docker_repo
 
 ## Test-Kitchen Serverspec
 
@@ -148,8 +181,10 @@ To implement this with test-kitchen setup the puppet repository with:
 
 * install kitchen-verifier-serverspec on your workstation i.e. 'gem install kitchen-verifier-serverspec'
 
+See examples:
+* [https://github.com/neillturner/puppet_vagrant_repo](https://github.com/neillturner/puppet_vagrant_repo)
 
-See example [https://github.com/neillturner/puppet_repo](https://github.com/neillturner/puppet_repo)
+* [https://github.com/neillturner/puppet_repo](https://github.com/neillturner/puppet_repo)
 
 ```
 .
@@ -178,8 +213,59 @@ suites:
       - modules/mycompany_base/spec/acceptance/base_spec.rb
 ```
 
-See [busser-beaker](https://github.com/neillturner/kitchen-verifier-serverspec)
+See [kitchen-verifier-serverspec](https://github.com/neillturner/kitchen-verifier-serverspec)
 
+## hiera_writer_files option
+
+Allows creation of arbitrary YAML files in the target instance's `hieradata/`
+dir in test-kitchen configuration (eg `kitchen.yml`). Like setting chef
+attributes in `kitchen.yml`, except for Hiera YAML files.
+
+set `hiera_writer_files` in `kitchen.yml`
+
+```
+---
+driver:
+  name: vagrant
+
+provisioner:
+  name: puppet_apply
+  manifests_path: /repository/puppet_repo/manifests
+  modules_path: /repository/puppet_repo/modules-mycompany
+  hiera_data_path: /repository/puppet_repo/hieradata
+  hiera_writer_files:
+    - datacenter/vagrant.yaml:
+        logstash_servers: []
+        hosts:
+          10.1.2.3:
+          - puppet
+          - puppetdb
+
+platforms:
+- name: nocm_ubuntu-12.04
+  driver_plugin: vagrant
+  driver_config:
+    box: nocm_ubuntu-12.04
+    box_url: http://puppet-vagrant-boxes.puppetlabs.com/ubuntu-server-12042-x64-vbox4210-nocm.box
+
+suites:
+ - name: default
+```
+
+The above configuration will result in the creation of a file on the guest named
+`${hieradata}/datacenter/vagrant.yaml` containing:
+
+```
+---
+logstash_servers: []
+  hosts:
+    10.1.2.3:
+    - puppet
+    - puppetdb
+```
+
+It will overwrite any existing Hiera YAML files with the same name (on the
+guest), not merge.
 
 ## Provisioner Options
 Please see the Provisioner Options (https://github.com/neillturner/kitchen-puppet/blob/master/provisioner_options.md).

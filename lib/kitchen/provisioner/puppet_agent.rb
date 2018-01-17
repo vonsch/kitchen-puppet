@@ -1,4 +1,5 @@
 # -*- encoding: utf-8 -*-
+
 #
 # Author:: Chris Lundquist (<chris.lundquist@github.com>) Neill Turner (<neillwturner@gmail.com>)
 #
@@ -21,13 +22,14 @@
 #
 
 require 'json'
+require 'kitchen'
 require 'kitchen/provisioner/base'
 require 'kitchen/provisioner/puppet/librarian'
 
 module Kitchen
   class Busser
     def non_suite_dirs
-      %w(data data_bags environments nodes roles puppet)
+      %w[data data_bags environments nodes roles puppet]
     end
   end
 
@@ -41,6 +43,7 @@ module Kitchen
       default_config :require_puppet_omnibus, false
       # TODO: use something like https://github.com/fnichol/omnibus-puppet
       default_config :puppet_omnibus_url, nil
+      default_config :puppet_environment, nil
       default_config :puppet_omnibus_remote_path, '/opt/puppet'
       default_config :puppet_version, nil
       default_config :facter_version, nil
@@ -54,6 +57,9 @@ module Kitchen
       default_config :puppet_agent_command, nil
 
       default_config :http_proxy, nil
+      default_config :https_proxy, nil
+      default_config :no_proxy, nil
+      default_config :puppet_whitelist_exit_code, nil
 
       default_config :puppet_config_path do |provisioner|
         provisioner.calculate_path('puppet.conf', :file)
@@ -73,7 +79,8 @@ module Kitchen
       default_config :puppet_test, false
       default_config :puppet_onetime, true
       default_config :puppet_no_daemonize, true
-      default_config :puppet_server, nil # will default to 'puppet'
+      # will default to 'puppet'
+      default_config :puppet_server, nil
       default_config :puppet_waitforcert, '0'
       default_config :puppet_certname, nil
       default_config :puppet_digest, nil
@@ -182,8 +189,7 @@ module Kitchen
         INSTALL
       end
 
-      def init_command
-      end
+      def init_command; end
 
       def create_sandbox
         super
@@ -218,33 +224,35 @@ module Kitchen
       end
 
       def run_command
-        if !config[:puppet_agent_command].nil?
-          return config[:puppet_agent_command]
-        else
-          [
-            custom_facts,
-            sudo_env('puppet'),
-            'agent',
-            puppet_server_flag,
-            "--waitforcert=#{config[:puppet_waitforcert]}",
-            puppet_masterport_flag,
-            puppet_certname_flag,
-            puppet_digest_flag,
-            puppet_detailed_exitcodes_flag,
-            puppet_logdest_flag,
-            puppet_test_flag,
-            puppet_onetime_flag,
-            puppet_no_daemonize_flag,
-            puppet_noop_flag,
-            puppet_verbose_flag,
-            puppet_debug_flag
-          ].join(' ')
-        end
+        return config[:puppet_agent_command] unless config[:puppet_agent_command].nil?
+        [
+          custom_facts,
+          sudo_env('puppet'),
+          'agent',
+          puppet_server_flag,
+          "--waitforcert=#{config[:puppet_waitforcert]}",
+          puppet_masterport_flag,
+          puppet_certname_flag,
+          puppet_digest_flag,
+          puppet_detailed_exitcodes_flag,
+          puppet_logdest_flag,
+          puppet_test_flag,
+          puppet_onetime_flag,
+          puppet_no_daemonize_flag,
+          puppet_noop_flag,
+          puppet_environment_flag,
+          puppet_verbose_flag,
+          puppet_debug_flag,
+          puppet_whitelist_exit_code
+        ].compact.join(' ')
       end
 
       protected
 
-      def load_needed_dependencies!
+      def load_needed_dependencies!; end
+
+      def puppet_environment_flag
+        config[:puppet_environment] ? "--environment=\"#{config[:puppet_environment]}\"" : nil
       end
 
       def puppet_config
@@ -292,7 +300,10 @@ module Kitchen
       end
 
       def sudo_env(pm)
-        http_proxy ? "#{sudo('env')} http_proxy=#{http_proxy} #{pm}" : sudo(pm).to_s
+        s = https_proxy ? "https_proxy=#{https_proxy}" : nil
+        p = http_proxy ? "http_proxy=#{http_proxy}" : nil
+        n = no_proxy ? "no_proxy=#{no_proxy}" : nil
+        p || s ? "#{sudo('env')} #{p} #{s} #{n} #{pm}" : sudo(pm).to_s
       end
 
       def custom_facts
@@ -308,7 +319,7 @@ module Kitchen
       end
 
       def puppet_masterport_flag
-        config[:puppet_masterport] ? '--masterport=#{config[:puppet_masterport]}' : nil
+        config[:puppet_masterport] ? "--masterport=#{config[:puppet_masterport]}" : nil
       end
 
       def puppet_detailed_exitcodes_flag
@@ -364,15 +375,42 @@ module Kitchen
       end
 
       def gem_proxy_parm
-        http_proxy ? "--http-proxy #{http_proxy}" : nil
+        p = http_proxy ? "--http-proxy #{http_proxy}" : nil
+        n = no_proxy ? "--no-http-proxy #{no_proxy}" : nil
+        p ? "#{p} #{n}" : nil
       end
 
       def wget_proxy_parm
-        http_proxy ? "-e use_proxy=yes -e http_proxy=#{http_proxy}" : nil
+        s = https_proxy ? "-e https_proxy=#{https_proxy}" : nil
+        p = http_proxy ? "-e http_proxy=#{http_proxy}" : nil
+        n = no_proxy ? "-e no_proxy=#{no_proxy}" : nil
+        p || s ? "-e use_proxy=yes #{p} #{s} #{n}" : nil
       end
 
       def http_proxy
         config[:http_proxy]
+      end
+
+      def https_proxy
+        config[:https_proxy]
+      end
+
+      def no_proxy
+        config[:no_proxy]
+      end
+
+      def powershell?
+        powershell_shell? || !(puppet_platform =~ /^windows.*/).nil?
+      end
+
+      def puppet_whitelist_exit_code
+        if config[:puppet_whitelist_exit_code].nil?
+          powershell? ? '; exit $LASTEXITCODE' : nil
+        elsif powershell?
+          "; if(@(#{[config[:puppet_whitelist_exit_code]].join(', ')}) -contains $LASTEXITCODE) {exit 0} else {exit $LASTEXITCODE}"
+        else
+          '; RC=$?; [ ' + [config[:puppet_whitelist_exit_code]].flatten.map { |x| "\$RC -eq #{x}" }.join(' -o ') + ' ] && exit 0; exit $RC'
+        end
       end
 
       def chef_url
